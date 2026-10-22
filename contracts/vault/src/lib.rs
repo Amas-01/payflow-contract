@@ -23,7 +23,7 @@ pub use error::Error;
 pub use events::{Debit, Deposit, DepositCapSet, Withdraw};
 pub use types::DataKey;
 
-use soroban_sdk::{contract, contractimpl, token, Address, Env};
+use soroban_sdk::{contract, contractimpl, token, Address, Env, String};
 
 const DAY_IN_LEDGERS: u32 = 17_280;
 const INSTANCE_BUMP: u32 = 30 * DAY_IN_LEDGERS;
@@ -31,9 +31,60 @@ const INSTANCE_THRESHOLD: u32 = INSTANCE_BUMP - DAY_IN_LEDGERS;
 const PERSIST_BUMP: u32 = 90 * DAY_IN_LEDGERS;
 const PERSIST_THRESHOLD: u32 = PERSIST_BUMP - DAY_IN_LEDGERS;
 
-#[allow(missing_docs)]
-mod contract {
-    use super::*;
+/// Custody for subscriber funds.
+///
+/// A pull-payment scheme fails the moment a subscriber's wallet is empty at
+/// charge time. The vault decouples funding from billing: subscribers top up
+/// ahead of time, and the subscription contract debits from a balance that is
+/// already committed. Custody is deliberately separated from billing logic so
+/// the two can be audited independently.
+#[contract]
+pub struct Vault;
+
+#[contractimpl]
+impl Vault {
+    /// The version of this contract's crate.
+    pub fn version(env: Env) -> String {
+        String::from_str(&env, env!("CARGO_PKG_VERSION"))
+    }
+
+    /// Runs once, in the same transaction that deploys the contract. With a
+    /// separate `initialize` call, anyone watching the ledger could call it
+    /// between the deploy and the owner's own call and make themselves admin.
+    pub fn __constructor(env: Env, admin: Address) {
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_THRESHOLD, INSTANCE_BUMP);
+    }
+
+    /// Point the vault at the subscription contract allowed to debit it.
+    pub fn set_subscription(env: Env, subscription: Address) -> Result<(), Error> {
+        Self::require_admin(&env)?;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Subscription, &subscription);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_THRESHOLD, INSTANCE_BUMP);
+        Ok(())
+    }
+
+    /// Turn the token allowlist on or off. Off by default, so a deployment
+    /// (testnet included) keeps accepting every SEP-41 token until the admin
+    /// opts in. Toggling it moves no funds: it only gates future deposits.
+    pub fn set_allowlist_enabled(env: Env, enabled: bool) -> Result<(), Error> {
+        Self::require_admin(&env)?;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::AllowlistEnabled, &enabled);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_THRESHOLD, INSTANCE_BUMP);
+        Ok(())
+    }
 
     /// Custody for subscriber funds.
     ///

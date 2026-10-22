@@ -191,3 +191,14 @@ pub struct FeeChanged {
     /// New protocol fee in basis points.
     pub new_fee_bps: u32,
 }
+
+/// Emitted after every state change to a mandate, carrying a complete snapshot
+/// of the mandate so indexers do not have to reconstruct state or risk drift
+/// from missed intermediate events.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MandateUpdated {
+    #[topic]
+    pub mandate_id: u64,
+    pub mandate: crate::types::Mandate,
+}
