@@ -49,31 +49,22 @@ pub const MAX_URL_LEN: u32 = 256;
 /// own storage entry, and a transaction may touch at most 100 entries.
 pub const MAX_PAGE: u32 = 50;
 
-#[contract]
-pub struct PlanRegistry;
+#[allow(missing_docs)]
+mod contract {
+    use super::*;
 
-#[contractimpl]
-#[allow(clippy::too_many_arguments)]
-impl PlanRegistry {
-    /// The version of this contract's crate.
-    pub fn version(env: Env) -> String {
-        String::from_str(&env, env!("CARGO_PKG_VERSION"))
-    }
-
-    /// Runs once, in the same transaction that deploys the contract. With a
-    /// separate `initialize` call, anyone watching the ledger could call it
-    /// between the deploy and the owner's own call and make themselves admin.
-    pub fn __constructor(env: Env, admin: Address) {
-        env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::NextPlanId, &1u64);
-        env.storage()
-            .instance()
-            .extend_ttl(INSTANCE_THRESHOLD, INSTANCE_BUMP);
-    }
+    /// Contract implementation for publishing and managing subscription plans.
+    #[contract]
+    pub struct PlanRegistry;
 
     #[contractimpl]
     #[allow(clippy::too_many_arguments)]
     impl PlanRegistry {
+        /// The version of this contract's crate.
+        pub fn version(env: Env) -> String {
+            String::from_str(&env, env!("CARGO_PKG_VERSION"))
+        }
+
         /// Runs once, in the same transaction that deploys the contract. With a
         /// separate `initialize` call, anyone watching the ledger could call it
         /// between the deploy and the owner's own call and make themselves admin.

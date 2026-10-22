@@ -198,7 +198,9 @@ pub struct FeeChanged {
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MandateUpdated {
+    /// Id of the updated mandate.
     #[topic]
     pub mandate_id: u64,
+    /// Complete snapshot of the mandate after update.
     pub mandate: crate::types::Mandate,
 }

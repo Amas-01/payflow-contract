@@ -49,165 +49,11 @@ pub const MAX_FEE_BPS: u32 = 1_000;
 /// so a page of 50 leaves room for the entries the caller reads alongside it.
 pub const MAX_PAGE: u32 = 50;
 
-/// Billing engine for pull-based recurring payments.
-///
-/// Classic Stellar has no pull-payment primitive: a payment must be pushed by
-/// the account that holds the funds. This contract supplies the missing half.
-/// A subscriber opens a `Mandate` once, and thereafter any caller may trigger
-/// `charge` when the mandate falls due. The mandate is the only thing standing
-/// between a merchant and a subscriber's balance, and it is bounded on every
-/// axis the subscriber cares about: fixed amount, fixed period, capped count,
-/// and cancellable at any time.
-#[contract]
-pub struct Subscription;
+#[allow(missing_docs)]
+mod contract {
+    use super::*;
 
-#[contractimpl]
-impl Subscription {
-    /// The version of this contract's crate.
-    pub fn version(env: Env) -> String {
-        String::from_str(&env, env!("CARGO_PKG_VERSION"))
-    }
-
-    /// Runs once, in the same transaction that deploys the contract. With a
-    /// separate `initialize` call, anyone watching the ledger could call it
-    /// between the deploy and the owner's own call and make themselves admin.
-    pub fn __constructor(
-        env: Env,
-        admin: Address,
-        plan_registry: Address,
-        vault: Address,
-        fee_bps: u32,
-        fee_to: Address,
-    ) -> Result<(), Error> {
-        if fee_bps > MAX_FEE_BPS {
-            return Err(Error::FeeTooHigh);
-        }
-
-        let s = env.storage().instance();
-        s.set(&DataKey::Admin, &admin);
-        s.set(&DataKey::PlanRegistry, &plan_registry);
-        s.set(&DataKey::Vault, &vault);
-        s.set(&DataKey::FeeBps, &fee_bps);
-        s.set(&DataKey::FeeTo, &fee_to);
-        s.set(&DataKey::NextMandateId, &1u64);
-        s.extend_ttl(INSTANCE_THRESHOLD, INSTANCE_BUMP);
-        Ok(())
-    }
-
-    /// Open a mandate against a published plan.
-    ///
-    /// The plan's terms are copied into the mandate here and never re-read, so
-    /// a merchant cannot change the price of a subscription after the fact.
-    /// The first charge is due immediately.
-    pub fn subscribe(
-        env: Env,
-        subscriber: Address,
-        plan_id: u64,
-        max_charges: u32,
-    ) -> Result<u64, Error> {
-        subscriber.require_auth();
-
-        let registry: Address = Self::cfg_address(&env, DataKey::PlanRegistry)?;
-        let plan = PlanRegistryClient::new(&env, &registry).get_plan(&plan_id);
-
-        if !plan.active {
-            return Err(Error::PlanInactive);
-        }
-
-        let id: u64 = env
-            .storage()
-            .instance()
-            .get(&DataKey::NextMandateId)
-            .ok_or(Error::NotInitialized)?;
-
-        let fee_bps: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::FeeBps)
-            .ok_or(Error::NotInitialized)?;
-
-        // The registry already caps this, but clamp again here: the mandate's
-        // tip must never exceed MAX_KEEPER_BPS even if the registry contract
-        // passed to this deployment does not enforce the cap.
-        let keeper_bps = plan.keeper_bps.min(MAX_KEEPER_BPS);
-
-        let now = env.ledger().timestamp();
-        let mandate = Mandate {
-            id,
-            subscriber: subscriber.clone(),
-            plan_id,
-            merchant: plan.merchant.clone(),
-            token: plan.token.clone(),
-            amount: plan.amount,
-            period: plan.period,
-            created_at: now,
-            next_charge: now,
-            last_charge: 0,
-            charges_made: 0,
-            max_charges,
-            fee_bps,
-            keeper_bps,
-            paused_until: 0,
-            refunded: 0,
-            status: MandateStatus::Active,
-        };
-
-        Self::write_mandate(&env, &mandate);
-        Self::index_push(
-            &env,
-            DataKey::SubscriberMandateCount(subscriber.clone()),
-            |i| DataKey::SubscriberMandate(subscriber.clone(), i),
-            id,
-        );
-        Self::index_push(
-            &env,
-            DataKey::MerchantMandateCount(plan.merchant.clone()),
-            |i| DataKey::MerchantMandate(plan.merchant.clone(), i),
-            id,
-        );
-
-        env.storage()
-            .instance()
-            .set(&DataKey::NextMandateId, &(id + 1));
-        env.storage()
-            .instance()
-            .extend_ttl(INSTANCE_THRESHOLD, INSTANCE_BUMP);
-
-        MandateUpdated {
-            mandate_id: id,
-            mandate,
-        }
-        .publish(&env);
-
-        Subscribed {
-            mandate_id: id,
-            subscriber,
-            merchant: plan.merchant,
-            plan_id,
-            amount: plan.amount,
-            period: plan.period,
-            next_charge: now,
-            max_charges,
-            fee_bps,
-            keeper_bps,
-        }
-        .publish(&env);
-
-        Ok(id)
-    }
-
-    /// Execute a due charge.
-    ///
-    /// Open to any caller: the mandate itself is the authorization, so the
-    /// merchant, a keeper bot, or the subscriber may all settle it. `keeper`
-    /// must authorize this call, because the plan's tip is paid to it; that is
-    /// the only signature required, and it grants no power over the mandate.
-    /// Competing keepers are what keeps billing alive without trusting one
-    /// operator to stay online.
-    ///
-    /// The tip is paid out of the merchant's share (see the plan's
-    /// `keeper_bps`), so the subscriber is debited exactly `mandate.amount`
-    /// whether or not a tip is paid, and the protocol fee is unaffected.
+    /// Billing engine for pull-based recurring payments.
     ///
     /// Classic Stellar has no pull-payment primitive: a payment must be pushed by
     /// the account that holds the funds. This contract supplies the missing half.
@@ -221,6 +67,11 @@ impl Subscription {
 
     #[contractimpl]
     impl Subscription {
+        /// The version of this contract's crate.
+        pub fn version(env: Env) -> String {
+            String::from_str(&env, env!("CARGO_PKG_VERSION"))
+        }
+
         /// Runs once, in the same transaction that deploys the contract. With a
         /// separate `initialize` call, anyone watching the ledger could call it
         /// between the deploy and the owner's own call and make themselves admin.
@@ -266,7 +117,7 @@ impl Subscription {
         /// Requires authorization from `subscriber`.
         ///
         /// # Events
-        /// Emits [`Subscribed`].
+        /// Emits [`MandateUpdated`] and [`Subscribed`].
         ///
         /// # Errors
         /// Returns [`Error::PlanInactive`] if the target plan is inactive, or
@@ -324,26 +175,19 @@ impl Subscription {
                 status: MandateStatus::Active,
             };
 
-        Self::write_mandate(&env, &mandate);
-
-        MandateUpdated {
-            mandate_id,
-            mandate: mandate.clone(),
-        }
-        .publish(&env);
-
-        Charged {
-            mandate_id,
-            subscriber: mandate.subscriber.clone(),
-            merchant: mandate.merchant.clone(),
-            amount: merchant_amount,
-            fee,
-            tip,
-            keeper,
-            charges_made: mandate.charges_made,
-            next_charge: mandate.next_charge,
-        }
-        .publish(&env);
+            Self::write_mandate(&env, &mandate);
+            Self::index_push(
+                &env,
+                DataKey::SubscriberMandateCount(subscriber.clone()),
+                |i| DataKey::SubscriberMandate(subscriber.clone(), i),
+                id,
+            );
+            Self::index_push(
+                &env,
+                DataKey::MerchantMandateCount(plan.merchant.clone()),
+                |i| DataKey::MerchantMandate(plan.merchant.clone(), i),
+                id,
+            );
 
             env.storage()
                 .instance()
@@ -351,6 +195,12 @@ impl Subscription {
             env.storage()
                 .instance()
                 .extend_ttl(INSTANCE_THRESHOLD, INSTANCE_BUMP);
+
+            MandateUpdated {
+                mandate_id: id,
+                mandate,
+            }
+            .publish(&env);
 
             Subscribed {
                 mandate_id: id,
@@ -391,7 +241,7 @@ impl Subscription {
         /// Requires authorization from `keeper`.
         ///
         /// # Events
-        /// Emits [`Charged`]. If this charge completes the mandate, also emits [`MandateCompleted`].
+        /// Emits [`MandateUpdated`] and [`Charged`]. If this charge completes the mandate, also emits [`MandateCompleted`].
         ///
         /// # Errors
         /// Returns [`Error::MandateNotFound`] if the mandate does not exist,
@@ -457,35 +307,9 @@ impl Subscription {
                 vault.debit(&mandate.subscriber, &mandate.token, &fee_to, &fee);
             }
 
-        // The mandate carries the new plan's terms from now on. A downgrade
-        // therefore bills the cheaper price at the next charge, and an
-        // upgrade has already collected the difference for the rest of the
-        // current period.
-        mandate.plan_id = new_plan_id;
-        mandate.amount = plan.amount;
-        mandate.period = plan.period;
-        mandate.keeper_bps = plan.keeper_bps.min(MAX_KEEPER_BPS);
-        Self::write_mandate(&env, &mandate);
-
-        MandateUpdated {
-            mandate_id,
-            mandate: mandate.clone(),
-        }
-        .publish(&env);
-
-        Upgraded {
-            mandate_id,
-            subscriber,
-            merchant: mandate.merchant,
-            old_plan_id,
-            new_plan_id,
-            old_amount,
-            new_amount: plan.amount,
-            charged,
-            period: plan.period,
-            next_charge: mandate.next_charge,
-        }
-        .publish(&env);
+            if tip > 0 {
+                vault.debit(&mandate.subscriber, &mandate.token, &keeper, &tip);
+            }
 
             // Settling through a scheduled pause that has run its course resumes
             // the mandate: the subscriber never has to send a transaction just to
@@ -505,20 +329,24 @@ impl Subscription {
 
             Self::write_mandate(&env, &mandate);
 
-        MandateUpdated {
-            mandate_id,
-            mandate: mandate.clone(),
-        }
-        .publish(&env);
+            MandateUpdated {
+                mandate_id,
+                mandate: mandate.clone(),
+            }
+            .publish(&env);
 
-        Cancelled {
-            mandate_id,
-            subscriber,
-            charges_made: mandate.charges_made,
-        }
-        .publish(&env);
-        Ok(())
-    }
+            Charged {
+                mandate_id,
+                subscriber: mandate.subscriber.clone(),
+                merchant: mandate.merchant.clone(),
+                amount: merchant_amount,
+                fee,
+                tip,
+                keeper,
+                charges_made: mandate.charges_made,
+                next_charge: mandate.next_charge,
+            }
+            .publish(&env);
 
             if completed {
                 MandateCompleted {
@@ -567,7 +395,7 @@ impl Subscription {
         /// Requires authorization from `subscriber`.
         ///
         /// # Events
-        /// Emits [`Upgraded`].
+        /// Emits [`MandateUpdated`] and [`Upgraded`].
         ///
         /// # Errors
         /// Returns [`Error::MandateNotFound`] if the mandate does not exist,
@@ -595,21 +423,17 @@ impl Subscription {
                 return Err(Error::MandateNotActive);
             }
 
-        MandateUpdated {
-            mandate_id,
-            mandate: mandate.clone(),
-        }
-        .publish(&env);
-
-        MandateEnded {
-            mandate_id,
-            merchant,
-            subscriber: mandate.subscriber,
-            charges_made: mandate.charges_made,
-        }
-        .publish(&env);
-        Ok(())
-    }
+            let registry: Address = Self::cfg_address(&env, DataKey::PlanRegistry)?;
+            let plan = PlanRegistryClient::new(&env, &registry).get_plan(&new_plan_id);
+            if !plan.active {
+                return Err(Error::PlanInactive);
+            }
+            if plan.token != mandate.token {
+                return Err(Error::DifferentToken);
+            }
+            if plan.merchant != mandate.merchant {
+                return Err(Error::DifferentMerchant);
+            }
 
             let old_plan_id = mandate.plan_id;
             let old_amount = mandate.amount;
@@ -636,31 +460,29 @@ impl Subscription {
                 0
             };
 
-        mandate.status = match (mandate.status, paused) {
-            (MandateStatus::Active, true) => MandateStatus::Paused,
-            (MandateStatus::Paused, false) => MandateStatus::Active,
-            _ => return Err(Error::MandateNotActive),
-        };
-        // This call owns the pause schedule: pausing opens an indefinite
-        // pause, resuming cancels whatever schedule was set before.
-        mandate.paused_until = 0;
+            if charged > 0 {
+                // The protocol fee on the difference, at the rate frozen into the
+                // mandate. The keeper tip is not paid here: no charge was
+                // settled, so nobody earned it.
+                let fee = charged
+                    .checked_mul(mandate.fee_bps as i128)
+                    .ok_or(Error::AmountOverflow)?
+                    / BPS_DENOMINATOR;
+                let merchant_gross = charged - fee;
 
-        Self::write_mandate(&env, &mandate);
-
-        MandateUpdated {
-            mandate_id,
-            mandate,
-        }
-        .publish(&env);
-
-        PauseChanged {
-            mandate_id,
-            subscriber,
-            paused,
-        }
-        .publish(&env);
-        Ok(())
-    }
+                let vault_addr: Address = Self::cfg_address(&env, DataKey::Vault)?;
+                let vault = VaultClient::new(&env, &vault_addr);
+                vault.debit(
+                    &subscriber,
+                    &mandate.token,
+                    &mandate.merchant,
+                    &merchant_gross,
+                );
+                if fee > 0 {
+                    let fee_to: Address = Self::cfg_address(&env, DataKey::FeeTo)?;
+                    vault.debit(&subscriber, &mandate.token, &fee_to, &fee);
+                }
+            }
 
             // The mandate carries the new plan's terms from now on. A downgrade
             // therefore bills the cheaper price at the next charge, and an
@@ -671,6 +493,12 @@ impl Subscription {
             mandate.period = plan.period;
             mandate.keeper_bps = plan.keeper_bps.min(MAX_KEEPER_BPS);
             Self::write_mandate(&env, &mandate);
+
+            MandateUpdated {
+                mandate_id,
+                mandate: mandate.clone(),
+            }
+            .publish(&env);
 
             Upgraded {
                 mandate_id,
@@ -696,7 +524,7 @@ impl Subscription {
         /// Requires authorization from `subscriber`.
         ///
         /// # Events
-        /// Emits [`Cancelled`].
+        /// Emits [`MandateUpdated`] and [`Cancelled`].
         ///
         /// # Errors
         /// Returns [`Error::MandateNotFound`] if the mandate does not exist,
@@ -718,23 +546,57 @@ impl Subscription {
             mandate.status = MandateStatus::Cancelled;
             Self::write_mandate(&env, &mandate);
 
-        MandateUpdated {
-            mandate_id,
-            mandate,
-        }
-        .publish(&env);
+            MandateUpdated {
+                mandate_id,
+                mandate: mandate.clone(),
+            }
+            .publish(&env);
 
-        PauseChanged {
-            mandate_id,
-            subscriber,
-            paused: true,
+            Cancelled {
+                mandate_id,
+                subscriber,
+                charges_made: mandate.charges_made,
+            }
+            .publish(&env);
+            Ok(())
         }
-        .publish(&env);
-        Ok(())
-    }
+
+        /// End a mandate from the merchant's side, for example when the service is
+        /// discontinued. Deactivating a plan only stops new subscriptions; this is
+        /// how a merchant stops billing the ones already open. Like `cancel`, it
+        /// is permanent, and it can only ever reduce what the subscriber pays.
+        ///
+        /// # Auth
+        /// Requires authorization from `merchant`.
+        ///
+        /// # Events
+        /// Emits [`MandateUpdated`] and [`MandateEnded`].
+        ///
+        /// # Errors
+        /// Returns [`Error::MandateNotFound`] if the mandate does not exist,
+        /// [`Error::NotMerchant`] if the caller is not the merchant, or
+        /// [`Error::MandateNotActive`] if the mandate is already cancelled or completed.
+        pub fn end_mandate(env: Env, merchant: Address, mandate_id: u64) -> Result<(), Error> {
+            merchant.require_auth();
+
+            let mut mandate = Self::read_mandate(&env, mandate_id)?;
+            if mandate.merchant != merchant {
+                return Err(Error::NotMerchant);
+            }
+            if mandate.status == MandateStatus::Cancelled
+                || mandate.status == MandateStatus::Completed
+            {
+                return Err(Error::MandateNotActive);
+            }
 
             mandate.status = MandateStatus::Cancelled;
             Self::write_mandate(&env, &mandate);
+
+            MandateUpdated {
+                mandate_id,
+                mandate: mandate.clone(),
+            }
+            .publish(&env);
 
             MandateEnded {
                 mandate_id,
@@ -756,7 +618,7 @@ impl Subscription {
         /// Requires authorization from `subscriber`.
         ///
         /// # Events
-        /// Emits [`PauseChanged`].
+        /// Emits [`MandateUpdated`] and [`PauseChanged`].
         ///
         /// # Errors
         /// Returns [`Error::MandateNotFound`] if the mandate does not exist,
@@ -775,33 +637,22 @@ impl Subscription {
                 return Err(Error::NotSubscriber);
             }
 
-        token::TokenClient::new(&env, &mandate.token).transfer(
-            &merchant,
-            &mandate.subscriber,
-            &amount,
-        );
-
-        mandate.refunded += amount;
-        Self::write_mandate(&env, &mandate);
-
-        MandateUpdated {
-            mandate_id,
-            mandate: mandate.clone(),
-        }
-        .publish(&env);
-
-        Refunded {
-            mandate_id,
-            subscriber: mandate.subscriber.clone(),
-            merchant,
-            amount,
-            refunded_total: mandate.refunded,
-        }
-        .publish(&env);
-        Ok(())
-    }
+            mandate.status = match (mandate.status, paused) {
+                (MandateStatus::Active, true) => MandateStatus::Paused,
+                (MandateStatus::Paused, false) => MandateStatus::Active,
+                _ => return Err(Error::MandateNotActive),
+            };
+            // This call owns the pause schedule: pausing opens an indefinite
+            // pause, resuming cancels whatever schedule was set before.
+            mandate.paused_until = 0;
 
             Self::write_mandate(&env, &mandate);
+
+            MandateUpdated {
+                mandate_id,
+                mandate,
+            }
+            .publish(&env);
 
             PauseChanged {
                 mandate_id,
@@ -828,7 +679,7 @@ impl Subscription {
         /// Requires authorization from `subscriber`.
         ///
         /// # Events
-        /// Emits [`PauseChanged`].
+        /// Emits [`MandateUpdated`] and [`PauseChanged`].
         ///
         /// # Errors
         /// Returns [`Error::MandateNotFound`] if the mandate does not exist,
@@ -863,6 +714,12 @@ impl Subscription {
             mandate.next_charge = mandate.next_charge.max(until);
             Self::write_mandate(&env, &mandate);
 
+            MandateUpdated {
+                mandate_id,
+                mandate,
+            }
+            .publish(&env);
+
             PauseChanged {
                 mandate_id,
                 subscriber,
@@ -892,7 +749,7 @@ impl Subscription {
         /// Requires authorization from `merchant`.
         ///
         /// # Events
-        /// Emits [`Refunded`].
+        /// Emits [`MandateUpdated`] and [`Refunded`].
         ///
         /// # Errors
         /// Returns [`Error::MandateNotFound`] if the mandate does not exist,
@@ -929,6 +786,12 @@ impl Subscription {
 
             mandate.refunded += amount;
             Self::write_mandate(&env, &mandate);
+
+            MandateUpdated {
+                mandate_id,
+                mandate: mandate.clone(),
+            }
+            .publish(&env);
 
             Refunded {
                 mandate_id,
@@ -1057,21 +920,19 @@ impl Subscription {
             Self::index_len(&env, DataKey::SubscriberMandateCount(subscriber))
         }
 
-    /// The id the next opened mandate will get. Mandates are numbered from 1,
-    /// so `next_mandate_id() - 1` is the number of mandates opened so far.
-    pub fn next_mandate_id(env: Env) -> Result<u64, Error> {
-        env.storage()
-            .instance()
-            .get(&DataKey::NextMandateId)
-            .ok_or(Error::NotInitialized)
-    }
-
-    pub fn fee_bps(env: Env) -> Result<u32, Error> {
-        env.storage()
-            .instance()
-            .get(&DataKey::FeeBps)
-            .ok_or(Error::NotInitialized)
-    }
+        /// Ids of the mandates `subscriber` opened, oldest first, starting at
+        /// position `start`. Returns at most `min(limit, MAX_PAGE)` ids.
+        pub fn subscriber_mandates(
+            env: Env,
+            subscriber: Address,
+            start: u32,
+            limit: u32,
+        ) -> Vec<u64> {
+            let len = Self::index_len(&env, DataKey::SubscriberMandateCount(subscriber.clone()));
+            Self::index_page(&env, len, start, limit, |i| {
+                DataKey::SubscriberMandate(subscriber.clone(), i)
+            })
+        }
 
         /// How many mandates have been opened against `merchant`'s plans.
         pub fn merchant_mandate_count(env: Env, merchant: Address) -> u32 {
@@ -1085,6 +946,15 @@ impl Subscription {
             Self::index_page(&env, len, start, limit, |i| {
                 DataKey::MerchantMandate(merchant.clone(), i)
             })
+        }
+
+        /// The id the next opened mandate will get. Mandates are numbered from 1,
+        /// so `next_mandate_id() - 1` is the number of mandates opened so far.
+        pub fn next_mandate_id(env: Env) -> Result<u64, Error> {
+            env.storage()
+                .instance()
+                .get(&DataKey::NextMandateId)
+                .ok_or(Error::NotInitialized)
         }
 
         /// Current protocol fee rate in basis points.
