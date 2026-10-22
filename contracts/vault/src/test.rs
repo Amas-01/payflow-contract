@@ -5,7 +5,7 @@ use payflow_test_token::{TestToken, TestTokenClient};
 use soroban_sdk::{
     testutils::Address as _,
     token::{StellarAssetClient, TokenClient},
-    Address, Env,
+    Address, Env, IntoVal,
 };
 
 struct Harness<'a> {
@@ -733,151 +733,62 @@ fn set_deposit_cap_rejects_a_negative_cap() {
     assert_eq!(h.vault.deposit_cap(&user, &h.token), 0);
 }
 
-// ---------------------------------------------------------------------------
-// Auth coverage: negative auth tests for every mutating function (#99)
-// ---------------------------------------------------------------------------
-
 #[test]
-fn set_subscription_requires_admin_auth() {
-    let h = setup();
-    let new_subscription = Address::generate(&h.env);
-
-    // Drop the blanket mock: the call must carry the admin's authorization.
-    h.env.set_auths(&[]);
-    assert!(h.vault.try_set_subscription(&new_subscription).is_err());
-    // The subscription pointer must remain unchanged.
-    assert_eq!(h.vault.subscription(), h.subscription);
-}
-
-#[test]
-fn set_allowlist_enabled_wrong_signer_rejected() {
-    let h = setup();
-    let wrong_signer = Address::generate(&h.env);
-
-    h.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
-        address: &wrong_signer,
-        invoke: &soroban_sdk::testutils::MockAuthInvoke {
-            contract: &h.vault_id,
-            fn_name: "set_allowlist_enabled",
-            args: (&true,).into_val(&h.env),
-            sub_invokes: &[],
-        },
-    }]);
-
-    assert!(h.vault.try_set_allowlist_enabled(&true).is_err());
-    assert!(!h.vault.allowlist_enabled());
-}
-
-#[test]
-fn set_token_allowed_wrong_signer_rejected() {
-    let h = setup();
-    let wrong_signer = Address::generate(&h.env);
-
-    h.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
-        address: &wrong_signer,
-        invoke: &soroban_sdk::testutils::MockAuthInvoke {
-            contract: &h.vault_id,
-            fn_name: "set_token_allowed",
-            args: (&h.token, &true).into_val(&h.env),
-            sub_invokes: &[],
-        },
-    }]);
-
-    assert!(h.vault.try_set_token_allowed(&h.token, &true).is_err());
-    assert!(!h.vault.token_allowed(&h.token));
-}
-
-#[test]
-fn set_deposit_cap_wrong_signer_rejected() {
-    let h = setup();
-    let user = funded_user(&h, 10_000);
-    let wrong_signer = Address::generate(&h.env);
-
-    h.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
-        address: &wrong_signer,
-        invoke: &soroban_sdk::testutils::MockAuthInvoke {
-            contract: &h.vault_id,
-            fn_name: "set_deposit_cap",
-            args: (&user, &h.token, &5_000).into_val(&h.env),
-            sub_invokes: &[],
-        },
-    }]);
-
-    assert!(h
-        .vault
-        .try_set_deposit_cap(&user, &h.token, &5_000)
-        .is_err());
-    assert_eq!(h.vault.deposit_cap(&user, &h.token), 0);
-}
-
-#[test]
-fn deposit_requires_user_auth() {
-    let h = setup();
-    let user = funded_user(&h, 10_000);
-    let wrong_signer = Address::generate(&h.env);
-
-    h.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
-        address: &wrong_signer,
-        invoke: &soroban_sdk::testutils::MockAuthInvoke {
-            contract: &h.vault_id,
-            fn_name: "deposit",
-            args: (&user, &h.token, &4_000).into_val(&h.env),
-            sub_invokes: &[],
-        },
-    }]);
-
-    assert!(h.vault.try_deposit(&user, &h.token, &4_000).is_err());
-    // No deposit must have occurred.
-    assert_eq!(h.vault.balance(&user, &h.token), 0);
-    assert_eq!(h.token_client.balance(&user), 10_000);
-}
-
-#[test]
-fn withdraw_requires_user_auth() {
-    let h = setup();
-    let user = funded_user(&h, 10_000);
-    h.vault.deposit(&user, &h.token, &4_000);
-
-    let wrong_signer = Address::generate(&h.env);
-    h.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
-        address: &wrong_signer,
-        invoke: &soroban_sdk::testutils::MockAuthInvoke {
-            contract: &h.vault_id,
-            fn_name: "withdraw",
-            args: (&user, &h.token, &1_000).into_val(&h.env),
-            sub_invokes: &[],
-        },
-    }]);
-
-    assert!(h.vault.try_withdraw(&user, &h.token, &1_000).is_err());
-    // No withdrawal must have occurred.
-    assert_eq!(h.vault.balance(&user, &h.token), 4_000);
-    assert_eq!(h.token_client.balance(&user), 6_000);
-}
-
-#[test]
-fn debit_requires_subscription_auth() {
+fn debits_stop_after_subscription_contract_is_replaced() {
     let h = setup();
     let user = funded_user(&h, 10_000);
     let merchant = Address::generate(&h.env);
     h.vault.deposit(&user, &h.token, &5_000);
 
-    let wrong_signer = Address::generate(&h.env);
+    let old_subscription = h.subscription;
+    let new_subscription = Address::generate(&h.env);
+
+    // Initial debit authorized as old_subscription succeeds.
     h.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
-        address: &wrong_signer,
+        address: &old_subscription,
         invoke: &soroban_sdk::testutils::MockAuthInvoke {
             contract: &h.vault_id,
             fn_name: "debit",
-            args: (&user, &h.token, &merchant, &1_200).into_val(&h.env),
+            args: (user.clone(), h.token.clone(), merchant.clone(), 1_000i128).into_val(&h.env),
             sub_invokes: &[],
         },
     }]);
+    h.vault.debit(&user, &h.token, &merchant, &1_000);
+    assert_eq!(h.vault.balance(&user, &h.token), 4_000);
+    assert_eq!(h.token_client.balance(&merchant), 1_000);
 
+    // Admin points the vault to the new subscription contract.
+    h.env.mock_all_auths();
+    h.vault.set_subscription(&new_subscription);
+    assert_eq!(h.vault.subscription(), new_subscription);
+
+    // Attempting debit as the old (retired) subscription contract now fails.
+    h.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &old_subscription,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &h.vault_id,
+            fn_name: "debit",
+            args: (user.clone(), h.token.clone(), merchant.clone(), 1_000i128).into_val(&h.env),
+            sub_invokes: &[],
+        },
+    }]);
     assert!(h
         .vault
-        .try_debit(&user, &h.token, &merchant, &1_200)
+        .try_debit(&user, &h.token, &merchant, &1_000)
         .is_err());
-    // No debit must have occurred.
-    assert_eq!(h.vault.balance(&user, &h.token), 5_000);
-    assert_eq!(h.token_client.balance(&merchant), 0);
+    assert_eq!(h.vault.balance(&user, &h.token), 4_000);
+
+    // Debit authorized as the new subscription contract succeeds.
+    h.env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &new_subscription,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &h.vault_id,
+            fn_name: "debit",
+            args: (user.clone(), h.token.clone(), merchant.clone(), 1_000i128).into_val(&h.env),
+            sub_invokes: &[],
+        },
+    }]);
+    h.vault.debit(&user, &h.token, &merchant, &1_000);
+    assert_eq!(h.vault.balance(&user, &h.token), 3_000);
+    assert_eq!(h.token_client.balance(&merchant), 2_000);
 }

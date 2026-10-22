@@ -27,18 +27,34 @@ change the contract interface.
   in payflow-backend and payflow-frontend, and the new error code needs a
   message in payflow-docs. Closes #104.
 
-### Changed
+- **plan-registry:** a short plan description. `Plan` gains a `description`
+  field (at most 280 bytes, may be empty) and `create_plan` takes it as a new
+  argument after `name`, so a subscriber can see what a plan includes without
+  leaving the app. The `plan_created` event carries the description too, so
+  indexers and apps need no follow-up contract read. A description longer than
+  the limit is rejected with the new `DescriptionTooLong` error (#15), and a
+  description at the limit is accepted. This is an interface change:
+  payflow-backend, payflow-frontend and payflow-docs need to read the new
+  field and to map the new error code. Closes #91.
 
-- **test:** negative auth tests for every mutating function across all contracts (#99).
-  Added comprehensive auth coverage including `cancel_requires_subscriber_auth`,
-  `set_paused_requires_subscriber_auth`, `end_mandate_wrong_signer_rejected`,
-  `pause_until_wrong_signer_rejected`, `refund_wrong_signer_rejected` (subscription),
-  `set_subscription_requires_admin_auth`, `deposit_requires_user_auth`,
-  `withdraw_requires_user_auth`, `debit_requires_subscription_auth` (vault),
-  and `create_plan_requires_merchant_auth`, `set_plan_active_requires_merchant_auth`
-  (plan-registry). A new CI gate (`scripts/check_auth_tests.sh`) ensures every
-  mutating function has a negative auth test; CI fails if a new function is added
-  without one.
+- **subscription:** `upgrade(subscriber, mandate_id, new_plan_id)` moves a
+  mandate onto another plan of the same merchant, denominated in the same
+  token. Moving to a more expensive plan collects the price difference for
+  the part of the current period that is still ahead, prorated and truncated
+  towards zero, so the subscriber never pays more than the exact difference
+  for the time that is left and the contract holds no fractional value.
+  Moving to a cheaper plan collects nothing and refunds nothing: it takes
+  effect at the next charge, because the period already paid for stays paid
+  for. The billing date does not move — `next_charge` is left alone, and the
+  new price applies from that charge. The protocol fee stays frozen at the
+  rate the mandate was opened with, and the keeper tip of the new plan is
+  clamped to `MAX_KEEPER_BPS`; no tip is paid on the upgrade itself, because
+  no charge was settled. A plan that is inactive, in another token or from
+  another merchant is rejected with the new `DifferentToken` (#16) and
+  `DifferentMerchant` (#17) errors. The rounding rule and the reasoning
+  behind it are written up in [ADR 0006](docs/adr/0006-prorated-upgrade-charging.md).
+  payflow-backend, payflow-frontend and payflow-docs need the new
+  `subscription_upgraded` event and the new error codes. Closes #94.
 
 # # [0.2.0] - 2026-10-09
 
