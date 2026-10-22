@@ -810,3 +810,76 @@ fn set_successor_emits_plan_successor_set() {
     let expected: soroban_sdk::xdr::StringM<32> = "plan_successor_set".try_into().unwrap();
     assert_eq!(event_name, &expected);
 }
+
+// ---------------------------------------------------------------------------
+// Auth coverage: negative auth tests for every mutating function (#99)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn create_plan_requires_merchant_auth() {
+    let (env, client, _admin) = setup();
+    let merchant = Address::generate(&env);
+    let token = Address::generate(&env);
+    let wrong_signer = Address::generate(&env);
+
+    env.mock_auths(&[MockAuth {
+        address: &wrong_signer,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "create_plan",
+            args: (
+                &merchant,
+                &token,
+                &1_000,
+                &604_800,
+                &String::from_str(&env, "Pro Monthly"),
+                &0,
+            )
+                .into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    assert!(client
+        .try_create_plan(
+            &merchant,
+            &token,
+            &1_000,
+            &604_800,
+            &String::from_str(&env, "Pro Monthly"),
+            &0,
+        )
+        .is_err());
+    // No plan must have been created.
+    assert_eq!(client.merchant_plan_count(&merchant), 0);
+}
+
+#[test]
+fn set_plan_active_requires_merchant_auth() {
+    let (env, client, _admin) = setup();
+    let merchant = Address::generate(&env);
+    let token = Address::generate(&env);
+    let id = client.create_plan(
+        &merchant,
+        &token,
+        &1_000,
+        &604_800,
+        &String::from_str(&env, "Pro Monthly"),
+        &0,
+    );
+
+    let wrong_signer = Address::generate(&env);
+    env.mock_auths(&[MockAuth {
+        address: &wrong_signer,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "set_plan_active",
+            args: (&merchant, &id, &false).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    assert!(client.try_set_plan_active(&merchant, &id, &false).is_err());
+    // The plan must remain active.
+    assert!(client.get_plan(&id).active);
+}

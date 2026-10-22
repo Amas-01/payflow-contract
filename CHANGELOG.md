@@ -9,6 +9,12 @@ change the contract interface.
 
 ### Added
 
+- **ci:** automated WASM build and SHA-256 artifact attachment on v* tags (#59).
+  A new release workflow builds `payflow_subscription.wasm`, `payflow_vault.wasm`,
+  and `payflow_plan_registry.wasm` when a version tag is pushed, computes
+  SHA-256 checksums in `SHA256SUMS`, and attaches all artifacts to the GitHub
+  release automatically. No manual build or upload step is required.
+
 - **vault:** an optional per-token deposit cap while the protocol is unaudited.
   The admin can call `set_deposit_cap(user, token, amount)` to cap the balance
   one subscriber may hold for one token; a cap of `0` means unlimited, which is
@@ -20,6 +26,19 @@ change the contract interface.
   `deposit_cap_set` event (topics `user`, `token`; data `cap`) needs handling
   in payflow-backend and payflow-frontend, and the new error code needs a
   message in payflow-docs. Closes #104.
+
+### Changed
+
+- **test:** negative auth tests for every mutating function across all contracts (#99).
+  Added comprehensive auth coverage including `cancel_requires_subscriber_auth`,
+  `set_paused_requires_subscriber_auth`, `end_mandate_wrong_signer_rejected`,
+  `pause_until_wrong_signer_rejected`, `refund_wrong_signer_rejected` (subscription),
+  `set_subscription_requires_admin_auth`, `deposit_requires_user_auth`,
+  `withdraw_requires_user_auth`, `debit_requires_subscription_auth` (vault),
+  and `create_plan_requires_merchant_auth`, `set_plan_active_requires_merchant_auth`
+  (plan-registry). A new CI gate (`scripts/check_auth_tests.sh`) ensures every
+  mutating function has a negative auth test; CI fails if a new function is added
+  without one.
 
 # # [0.2.0] - 2026-10-09
 
