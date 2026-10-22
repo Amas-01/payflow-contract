@@ -9,10 +9,10 @@ change the contract interface.
 
 ### Added
 
-- **subscription:** `next_mandate_id()` returns the id that the next mandate
-  will receive, letting clients show the total number opened without an
-  indexer. payflow-backend, payflow-frontend and payflow-docs should expose this
-  view.
+- **contracts:** expose `version()` on the subscription, plan-registry and vault
+  contracts so clients can identify the deployed crate version. This interface
+  addition needs handling in payflow-backend, payflow-frontend and payflow-docs.
+  Closes #66.
 
 - **vault:** an optional per-token deposit cap while the protocol is unaudited.
   The admin can call `set_deposit_cap(user, token, amount)` to cap the balance
