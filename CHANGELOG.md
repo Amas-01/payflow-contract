@@ -52,6 +52,10 @@ change the contract interface.
 
 ### Changed
 
+- **contracts:** document every public item across all crates and enforce
+  `#![deny(missing_docs)]` so new undocumented public items fail `cargo doc`.
+  No interface or event changes. Closes #64.
+
 - **subscription:** `charge(keeper, mandate_id)` now returns a `ChargeResult`
   containing the merchant amount, protocol fee, charge count, next charge time
   and completion flag. The return values match the corresponding `Charged`
