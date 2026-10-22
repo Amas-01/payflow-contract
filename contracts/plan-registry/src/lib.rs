@@ -65,15 +65,68 @@ mod contract {
             String::from_str(&env, env!("CARGO_PKG_VERSION"))
         }
 
-        /// Runs once, in the same transaction that deploys the contract. With a
-        /// separate `initialize` call, anyone watching the ledger could call it
-        /// between the deploy and the owner's own call and make themselves admin.
-        pub fn __constructor(env: Env, admin: Address) {
-            env.storage().instance().set(&DataKey::Admin, &admin);
-            env.storage().instance().set(&DataKey::NextPlanId, &1u64);
-            env.storage()
-                .instance()
-                .extend_ttl(INSTANCE_THRESHOLD, INSTANCE_BUMP);
+        let id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::NextPlanId)
+            .ok_or(Error::NotInitialized)?;
+
+        let plan = Plan {
+            id,
+            merchant: merchant.clone(),
+            name: name.clone(),
+            description: description.clone(),
+            token: token.clone(),
+            amount,
+            period,
+            active: true,
+            keeper_bps,
+            successor_id: 0,
+        };
+
+        env.storage().persistent().set(&DataKey::Plan(id), &plan);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Plan(id), PERSIST_THRESHOLD, PERSIST_BUMP);
+
+        // One entry per position, so publishing a plan costs the same however
+        // many plans the merchant already has.
+        let count_key = DataKey::MerchantPlanCount(merchant.clone());
+        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        let slot_key = DataKey::MerchantPlan(merchant.clone(), count);
+        let p = env.storage().persistent();
+        p.set(&slot_key, &id);
+        p.extend_ttl(&slot_key, PERSIST_THRESHOLD, PERSIST_BUMP);
+        p.set(&count_key, &(count + 1));
+        p.extend_ttl(&count_key, PERSIST_THRESHOLD, PERSIST_BUMP);
+
+        // One entry per position in the per-token index, so publishing a plan
+        // costs constant time and storage footprint regardless of how many
+        // plans already use the token.
+        let token_count_key = DataKey::TokenPlanCount(token.clone());
+        let token_count: u32 = p.get(&token_count_key).unwrap_or(0);
+        let token_slot_key = DataKey::TokenPlan(token.clone(), token_count);
+        p.set(&token_slot_key, &id);
+        p.extend_ttl(&token_slot_key, PERSIST_THRESHOLD, PERSIST_BUMP);
+        p.set(&token_count_key, &(token_count + 1));
+        p.extend_ttl(&token_count_key, PERSIST_THRESHOLD, PERSIST_BUMP);
+
+        env.storage()
+            .instance()
+            .set(&DataKey::NextPlanId, &(id + 1));
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_THRESHOLD, INSTANCE_BUMP);
+
+        PlanCreated {
+            merchant,
+            plan_id: id,
+            token: plan.token.clone(),
+            amount: plan.amount,
+            period: plan.period,
+            name,
+            description,
+            keeper_bps,
         }
 
         /// Publish a new plan. Only the merchant may publish plans in its own name.
@@ -434,13 +487,40 @@ mod contract {
             Ok(deactivated)
         }
 
-        /// Look up a published plan by its unique ID.
-        pub fn get_plan(env: Env, plan_id: u64) -> Result<Plan, Error> {
-            env.storage()
+    /// How many plans are priced in `token`, active or not.
+    pub fn token_plan_count(env: Env, token: Address) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TokenPlanCount(token))
+            .unwrap_or(0)
+    }
+
+    /// Ids of the plans priced in `token`, oldest first, starting at
+    /// position `start`. Returns at most `min(limit, MAX_PAGE)` ids.
+    pub fn token_plans(env: Env, token: Address, start: u32, limit: u32) -> Vec<u64> {
+        let len = Self::token_plan_count(env.clone(), token.clone());
+        let end = start.saturating_add(limit.min(MAX_PAGE)).min(len);
+        let mut out = Vec::new(&env);
+        for i in start..end {
+            if let Some(id) = env
+                .storage()
                 .persistent()
-                .get(&DataKey::Plan(plan_id))
-                .ok_or(Error::PlanNotFound)
+                .get::<_, u64>(&DataKey::TokenPlan(token.clone(), i))
+            {
+                out.push_back(id);
+            }
         }
+        out
+    }
+
+    /// The id the next published plan will get. Plans are numbered from 1, so
+    /// `next_plan_id() - 1` is the number of plans published so far.
+    pub fn next_plan_id(env: Env) -> Result<u64, Error> {
+        env.storage()
+            .instance()
+            .get(&DataKey::NextPlanId)
+            .ok_or(Error::NotInitialized)
+    }
 
         /// How many plans `merchant` has published, active or not.
         pub fn merchant_plan_count(env: Env, merchant: Address) -> u32 {
