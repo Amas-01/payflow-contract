@@ -493,3 +493,44 @@ fn deactivate_page_requires_the_merchants_auth() {
     env.set_auths(&[]);
     assert!(client.try_deactivate_page(&merchant, &0, &10).is_err());
 }
+
+#[test]
+fn create_plan_rejects_a_multibyte_name_over_the_byte_limit() {
+    let (env, client, _admin) = setup();
+    let merchant = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    // A single euro sign is 3 bytes in UTF-8. 22 of them is 22 characters
+    // but 66 bytes, which is under 64 characters yet over the 64-byte limit.
+    // The guard counts bytes, not characters, so this must be rejected.
+    let name = "€".repeat(22);
+    assert_eq!(name.len(), 66); // UTF-8 byte length, not character count
+    let res = client.try_create_plan(
+        &merchant,
+        &token,
+        &1_000,
+        &604_800,
+        &String::from_str(&env, &name),
+    );
+    assert_eq!(res, Err(Ok(Error::NameTooLong)));
+}
+
+#[test]
+fn create_plan_accepts_a_multibyte_name_at_the_byte_limit() {
+    let (env, client, _admin) = setup();
+    let merchant = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    // 21 euro signs is 63 bytes, under the limit, so it is accepted and the
+    // full multibyte name is stored verbatim.
+    let name = "€".repeat(21);
+    assert_eq!(name.len(), 63);
+    let id = client.create_plan(
+        &merchant,
+        &token,
+        &1_000,
+        &604_800,
+        &String::from_str(&env, &name),
+    );
+    assert_eq!(client.get_plan(&id).name, String::from_str(&env, &name));
+}
