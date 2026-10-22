@@ -9,10 +9,10 @@ change the contract interface.
 
 ### Added
 
-- `subscription:MandateUpdated`: emitted after every state change to a mandate
-  (`subscribe`, `charge`, `cancel`, `end_mandate`, `set_paused`, `pause_until`,
-  `refund`, `upgrade`), carrying the full `Mandate` snapshot so indexers avoid
-  projection drift without needing follow-up contract reads. Closes #103.
+- **subscription:** `next_mandate_id()` returns the id that the next mandate
+  will receive, letting clients show the total number opened without an
+  indexer. payflow-backend, payflow-frontend and payflow-docs should expose this
+  view.
 
 - **vault:** an optional per-token deposit cap while the protocol is unaudited.
   The admin can call `set_deposit_cap(user, token, amount)` to cap the balance
