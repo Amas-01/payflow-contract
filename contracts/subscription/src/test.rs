@@ -1622,6 +1622,56 @@ fn fee_to_contract_address_receives_the_fee() {
     assert_eq!(vault.balance(&user, &token), 50_000 - PRICE);
 }
 
+// ---------------------------------------------------------------------------
+// Auth coverage: negative auth tests for every mutating function (#99)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cancel_requires_subscriber_auth() {
+    let w = world();
+    let plan_id = w.plan();
+    let user = w.subscriber(100_000);
+    let id = w.sub.subscribe(&user, &plan_id, &0);
+
+    let wrong_signer = Address::generate(&w.env);
+    w.env.mock_auths(&[MockAuth {
+        address: &wrong_signer,
+        invoke: &MockAuthInvoke {
+            contract: &w.sub.address,
+            fn_name: "cancel",
+            args: (&user, &id).into_val(&w.env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    assert!(w.sub.try_cancel(&user, &id).is_err());
+    // The mandate must remain active.
+    assert_eq!(w.sub.get_mandate(&id).status, MandateStatus::Active);
+}
+
+#[test]
+fn set_paused_requires_subscriber_auth() {
+    let w = world();
+    let plan_id = w.plan();
+    let user = w.subscriber(100_000);
+    let id = w.sub.subscribe(&user, &plan_id, &0);
+
+    let wrong_signer = Address::generate(&w.env);
+    w.env.mock_auths(&[MockAuth {
+        address: &wrong_signer,
+        invoke: &MockAuthInvoke {
+            contract: &w.sub.address,
+            fn_name: "set_paused",
+            args: (&user, &id, &true).into_val(&w.env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    assert!(w.sub.try_set_paused(&user, &id, &true).is_err());
+    // The mandate must remain active.
+    assert_eq!(w.sub.get_mandate(&id).status, MandateStatus::Active);
+}
+
 struct FailingTokenWorld<'a> {
     env: Env,
     sub: SubscriptionClient<'a>,
@@ -1805,4 +1855,75 @@ fn charge_reverts_completely_when_keeper_tip_transfer_fails() {
     assert_eq!(w.test_token.balance(&w.fee_to), 0);
     assert_eq!(w.test_token.balance(&w.keeper), 0);
     assert_eq!(w.test_token.balance(&w.vault.address), 50_000);
+}
+
+#[test]
+fn end_mandate_wrong_signer_rejected() {
+    let w = world();
+    let plan_id = w.plan();
+    let user = w.subscriber(100_000);
+    let id = w.sub.subscribe(&user, &plan_id, &0);
+
+    let wrong_signer = Address::generate(&w.env);
+    w.env.mock_auths(&[MockAuth {
+        address: &wrong_signer,
+        invoke: &MockAuthInvoke {
+            contract: &w.sub.address,
+            fn_name: "end_mandate",
+            args: (&w.merchant, &id).into_val(&w.env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    assert!(w.sub.try_end_mandate(&w.merchant, &id).is_err());
+    // The mandate must remain active.
+    assert_eq!(w.sub.get_mandate(&id).status, MandateStatus::Active);
+}
+
+#[test]
+fn pause_until_wrong_signer_rejected() {
+    let w = world();
+    let plan_id = w.plan();
+    let user = w.subscriber(100_000);
+    let id = w.sub.subscribe(&user, &plan_id, &0);
+    let until = w.env.ledger().timestamp() + MONTH;
+
+    let wrong_signer = Address::generate(&w.env);
+    w.env.mock_auths(&[MockAuth {
+        address: &wrong_signer,
+        invoke: &MockAuthInvoke {
+            contract: &w.sub.address,
+            fn_name: "pause_until",
+            args: (&user, &id, &until).into_val(&w.env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    assert!(w.sub.try_pause_until(&user, &id, &until).is_err());
+    // The mandate must remain active.
+    assert_eq!(w.sub.get_mandate(&id).status, MandateStatus::Active);
+}
+
+#[test]
+fn refund_wrong_signer_rejected() {
+    let w = world();
+    let plan_id = w.plan();
+    let user = w.subscriber(100_000);
+    let id = w.sub.subscribe(&user, &plan_id, &0);
+    w.sub.charge(&w.keeper, &id);
+
+    let wrong_signer = Address::generate(&w.env);
+    w.env.mock_auths(&[MockAuth {
+        address: &wrong_signer,
+        invoke: &MockAuthInvoke {
+            contract: &w.sub.address,
+            fn_name: "refund",
+            args: (&w.merchant, &id, &1_000).into_val(&w.env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    assert!(w.sub.try_refund(&w.merchant, &id, &1_000).is_err());
+    // No refund must have been recorded.
+    assert_eq!(w.sub.get_mandate(&id).refunded, 0);
 }
