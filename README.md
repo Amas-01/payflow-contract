@@ -115,7 +115,7 @@ costs the same whether the merchant has one subscriber or a million, and nobody
 can block a merchant by opening throwaway mandates until a list outgrows the
 ledger's entry size limit.
 
-**Paged reads.** `merchant_plans`, `merchant_mandates` and `subscriber_mandates`
+**Paged reads.** `merchant_plans`, `token_plans`, `merchant_mandates` and `subscriber_mandates`
 take `start` and `limit` and return at most 50 ids (`MAX_PAGE`), because one
 transaction may touch at most 100 ledger entries. Each has a matching
 `*_count` function, and `next_plan_id` tells a client how many plans exist.
@@ -191,6 +191,50 @@ Smoke-test a live deployment end to end:
 
 ```bash
 ./scripts/demo.sh testnet   # reads deployments/testnet.env
+```
+
+## TypeScript clients
+
+Install the generated clients from npm:
+
+```bash
+npm install @mmm-pay/contracts @stellar/stellar-sdk
+```
+
+Use the generated client with the testnet RPC to read contract state:
+
+```ts
+import { Networks } from "@stellar/stellar-sdk";
+import { PlanRegistryClient } from "@mmm-pay/contracts";
+
+const registry = new PlanRegistryClient({
+  contractId: "YOUR_PLAN_REGISTRY_ID",
+  networkPassphrase: Networks.TESTNET,
+  rpcUrl: "https://soroban-testnet.stellar.org",
+});
+
+const transaction = await registry.next_plan_id();
+await transaction.simulate();
+const nextPlanId = transaction.result.unwrap();
+```
+
+The package also exports `VaultClient` and `SubscriptionClient`, with
+contract-specific types under `PlanRegistryTypes`, `VaultTypes` and
+`SubscriptionTypes`. Mutating methods return transactions that integrators
+must authorize and submit with the Stellar SDK.
+
+CI builds and verifies the bindings on contract changes. Publishing a GitHub
+release publishes the matching version to npm; the repository needs an
+`NPM_TOKEN` secret. The manual **TypeScript bindings testnet smoke** workflow
+checks the live registry's `next_plan_id` read without a signing key.
+
+To regenerate and check the package locally after changing a contract:
+
+```bash
+stellar contract build
+./scripts/generate-bindings.sh
+npm ci --prefix bindings
+npm test --prefix bindings
 ```
 
 ## Repository layout

@@ -9,11 +9,10 @@ change the contract interface.
 
 ### Added
 
-- **ci:** automated WASM build and SHA-256 artifact attachment on v* tags (#59).
-  A new release workflow builds `payflow_subscription.wasm`, `payflow_vault.wasm`,
-  and `payflow_plan_registry.wasm` when a version tag is pushed, computes
-  SHA-256 checksums in `SHA256SUMS`, and attaches all artifacts to the GitHub
-  release automatically. No manual build or upload step is required.
+- **contracts:** expose `version()` on the subscription, plan-registry and vault
+  contracts so clients can identify the deployed crate version. This interface
+  addition needs handling in payflow-backend, payflow-frontend and payflow-docs.
+  Closes #66.
 
 - **vault:** an optional per-token deposit cap while the protocol is unaudited.
   The admin can call `set_deposit_cap(user, token, amount)` to cap the balance
@@ -37,6 +36,14 @@ change the contract interface.
   payflow-backend, payflow-frontend and payflow-docs need to read the new
   field and to map the new error code. Closes #91.
 
+- **plan-registry:** list plans by token. A per-token index is maintained
+  with the same per-position layout as the per-merchant index, exposing
+  `token_plans(token, start, limit)` and `token_plan_count(token)` so apps
+  and storefronts can list all plans priced in a given asset without an
+  off-chain indexer. Writing to the index adds constant cost to `create_plan`.
+  This is an interface addition: payflow-backend, payflow-frontend and
+  payflow-docs can query the new read endpoints. Closes #106.
+
 - **subscription:** `upgrade(subscriber, mandate_id, new_plan_id)` moves a
   mandate onto another plan of the same merchant, denominated in the same
   token. Moving to a more expensive plan collects the price difference for
@@ -55,6 +62,19 @@ change the contract interface.
   behind it are written up in [ADR 0006](docs/adr/0006-prorated-upgrade-charging.md).
   payflow-backend, payflow-frontend and payflow-docs need the new
   `subscription_upgraded` event and the new error codes. Closes #94.
+
+### Changed
+
+- **contracts:** document every public item across all crates and enforce
+  `#![deny(missing_docs)]` so new undocumented public items fail `cargo doc`.
+  No interface or event changes. Closes #64.
+
+- **subscription:** `charge(keeper, mandate_id)` now returns a `ChargeResult`
+  containing the merchant amount, protocol fee, charge count, next charge time
+  and completion flag. The return values match the corresponding `Charged`
+  event fields, so callers do not need an extra contract read. This contract
+  interface change needs handling in payflow-backend, payflow-frontend and
+  payflow-docs. Closes #89.
 
 # # [0.2.0] - 2026-10-09
 
@@ -102,6 +122,15 @@ Redeployed to testnet; the ids are in [`deployments/testnet.env`](deployments/te
   ending and constructor configuration.
 
 ## Unreleased
+
+### Added
+
+- Generated TypeScript clients for the plan registry, vault and subscription
+  contracts are published together as `@mmm-pay/contracts` on tagged releases.
+  CI verifies the generated package, and a manual testnet smoke workflow calls
+  the registry's read-only `next_plan_id` method. Follow-up adoption issues in
+  `payflow-frontend`, `payflow-backend` and `payflow-docs` should replace
+  handwritten wrappers and document the package as appropriate.
 
 ### Security
 
