@@ -172,6 +172,7 @@ mod contract {
                 keeper_bps,
                 paused_until: 0,
                 refunded: 0,
+                seats: 1,
                 status: MandateStatus::Active,
             };
 
