@@ -9,6 +9,11 @@ change the contract interface.
 
 ### Added
 
+- **tests:** the subscription, vault and plan-registry suites will assert the
+  exact `env.auths()` tree for every state-changing function, and each mutating
+  function gains a negative test using `mock_auths` with the wrong signer. No
+  interface, event or error changes. Closes the auth-tree test issue.
+
 - **contracts:** expose `version()` on the subscription, plan-registry and vault
   contracts so clients can identify the deployed crate version. This interface
   addition needs handling in payflow-backend, payflow-frontend and payflow-docs.

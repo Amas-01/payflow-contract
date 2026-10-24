@@ -174,6 +174,33 @@ fn subscribe_copies_plan_terms_into_mandate() {
     assert_eq!(m.next_charge, w.env.ledger().timestamp());
 }
 
+/// Acceptance check for the auth-tree issue: `subscribe` must require exactly
+/// the subscriber's authorization for `subscribe(subscriber, plan_id, max_charges)`,
+/// and nothing else.
+#[test]
+fn subscribe_auth_tree_is_exactly_the_subscriber() {
+    let w = world();
+    let plan_id = w.plan();
+    let user = w.subscriber(100_000);
+
+    w.env.mock_auths(&[MockAuth {
+        address: &user,
+        invoke: &MockAuthInvoke {
+            contract: &w.sub.address,
+            fn_name: "subscribe",
+            args: (&user, &plan_id, &0u32).into_val(&w.env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let id = w.sub.subscribe(&user, &plan_id, &0);
+    // env.auths() reports the last invocation only, so read it before get_mandate.
+    let auths = w.env.auths();
+    assert_eq!(w.sub.get_mandate(&id).subscriber, user);
+    assert_eq!(auths.len(), 1);
+    assert_eq!(auths[0].0, user);
+}
+
 #[test]
 fn estimated_end_tracks_the_schedule_after_a_late_charge() {
     let w = world();
