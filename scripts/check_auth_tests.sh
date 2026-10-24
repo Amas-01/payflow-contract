@@ -32,6 +32,7 @@ declare -A allowlist_subscription=(
     [vault]=1
     [charge]=1  # permissionless by design (ADR 0005)
     [version]=1
+    [version]=1
     [__constructor]=1  # constructors don't require auth tests
 )
 
@@ -43,6 +44,7 @@ declare -A allowlist_vault=(
     [subscription]=1
     [admin]=1
     [version]=1
+    [version]=1
     [__constructor]=1  # constructors don't require auth tests
 )
 
@@ -53,6 +55,7 @@ declare -A allowlist_plan_registry=(
     [merchant_plans]=1
     [next_plan_id]=1
     [admin]=1
+    [version]=1
     [version]=1
     [__constructor]=1  # constructors don't require auth tests
 )
