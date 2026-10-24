@@ -35,12 +35,12 @@ pub enum MandateStatus {
     Paused,
     /// Terminated by the subscriber. Irreversible.
     Cancelled,
-    /// Reached `max_charges`. Irreversible.
+    /// Reached `max_charges` or `max_total`. Irreversible.
     Completed,
 }
 
 /// A standing authorization from a subscriber to a merchant, bounded in
-/// amount, frequency, and total number of charges.
+/// amount, frequency, total number of charges and total spend.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Mandate {
@@ -87,6 +87,12 @@ pub struct Mandate {
     /// Number of seats the subscriber is paying for. `1` for non-seat plans.
     /// `amount` already equals the per-seat price multiplied by this value.
     pub seats: u32,
+    /// Ceiling on everything this mandate may ever debit, frozen when the
+    /// subscriber opened it. 0 means open-ended. Mandates opened before this
+    /// field existed decode to 0 and are therefore uncapped.
+    pub max_total: i128,
+    /// Total debited by settled charges so far, the figure `max_total` caps.
+    pub total_spent: i128,
     /// Current lifecycle state of the mandate.
     pub status: MandateStatus,
 }

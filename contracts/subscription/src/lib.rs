@@ -131,8 +131,13 @@ mod contract {
             subscriber: Address,
             plan_id: u64,
             max_charges: u32,
+            max_total: i128,
         ) -> Result<u64, Error> {
             subscriber.require_auth();
+
+            if max_total < 0 {
+                return Err(Error::InvalidMaxTotal);
+            }
 
             let registry: Address = Self::cfg_address(&env, DataKey::PlanRegistry)?;
             let plan = PlanRegistryClient::new(&env, &registry).get_plan(&plan_id);
@@ -177,6 +182,8 @@ mod contract {
                 paused_until: 0,
                 refunded: 0,
                 seats: 1,
+                max_total,
+                total_spent: 0,
                 status: MandateStatus::Active,
             };
 
@@ -212,6 +219,7 @@ mod contract {
                 subscriber,
                 merchant: plan.merchant,
                 plan_id,
+                max_total,
                 amount: plan.amount,
                 period: plan.period,
                 next_charge: now,
@@ -270,6 +278,16 @@ mod contract {
             if mandate.max_charges != 0 && mandate.charges_made >= mandate.max_charges {
                 return Err(Error::MaxChargesReached);
             }
+            // A charge that would cross the total-spend cap is not settled at
+            // all: a partial debit would bill the subscriber for something the
+            // merchant never agreed to deliver.
+            let next_total = mandate
+                .total_spent
+                .checked_add(mandate.amount)
+                .ok_or(Error::AmountOverflow)?;
+            if mandate.max_total != 0 && next_total > mandate.max_total {
+                return Err(Error::MaxChargesReached);
+            }
 
             let (fee, tip, merchant_amount) = Self::fee_split(&mandate)?;
             let charges_made = mandate
@@ -279,7 +297,8 @@ mod contract {
             let next_charge = now
                 .checked_add(mandate.period)
                 .ok_or(Error::AmountOverflow)?;
-            let completed = mandate.max_charges != 0 && charges_made >= mandate.max_charges;
+            let completed = (mandate.max_charges != 0 && charges_made >= mandate.max_charges)
+                || (mandate.max_total != 0 && next_total >= mandate.max_total);
 
             let vault_addr: Address = Self::cfg_address(&env, DataKey::Vault)?;
             let vault = VaultClient::new(&env, &vault_addr);
@@ -309,6 +328,7 @@ mod contract {
             }
 
             mandate.charges_made = charges_made;
+            mandate.total_spent = next_total;
             mandate.last_charge = now;
             mandate.next_charge = next_charge;
 
@@ -946,6 +966,9 @@ mod contract {
             if m.max_charges != 0 && m.charges_made >= m.max_charges {
                 return Ok(false);
             }
+            if m.max_total != 0 && m.total_spent.saturating_add(m.amount) > m.max_total {
+                return Ok(false);
+            }
             Ok(env.ledger().timestamp() >= m.next_charge)
         }
 
@@ -968,6 +991,7 @@ mod contract {
             let now = env.ledger().timestamp();
             let chargeable = Self::active_at(&m, now)
                 && (m.max_charges == 0 || m.charges_made < m.max_charges)
+                && (m.max_total == 0 || m.total_spent.saturating_add(m.amount) <= m.max_total)
                 && now >= m.next_charge;
 
             Ok(ChargeQuote {

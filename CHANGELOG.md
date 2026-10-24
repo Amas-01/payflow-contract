@@ -9,6 +9,21 @@ change the contract interface.
 
 ### Added
 
+- `subscription:subscribe` accepts `max_total` (0 = uncapped). Mandates track
+  settled spend and complete without a debit when the next full charge would
+  exceed the cap; the existing `max_charges` limit continues to apply, and
+  either limit may complete a mandate first. `Subscribed` includes `max_total`.
+The `subscribe` argument and `Mandate`/`Subscribed` fields also change for
+`max_total` and `total_spent`. These interface changes ripple into
+`payflow-backend`, `payflow-frontend` and `payflow-docs`; create and link
+follow-up issues in the pull request.
+
+- **Breaking:** `subscribe` gains `max_total`, `Mandate` gains `max_total` and
+  `total_spent`, and `Subscribed` gains `max_total`. Existing deployments must
+  be redeployed because stored mandates do not contain the new fields. Follow-up
+  issues for `payflow-backend`, `payflow-frontend` and `payflow-docs` should be
+  linked in the pull request.
+
 - `plan-registry:set_plan_name(merchant, plan_id, name)`: a merchant can rename
   any of its plans. The name is bounded by `MAX_NAME_LEN` bytes (64); longer
   names are rejected with `PlanNameTooLong`. Only the plan's merchant may rename

@@ -56,4 +56,6 @@ pub enum Error {
     SeatsNotApplicable = 20,
     /// `price * seats` overflows `i128`.
     SeatsOverflow = 21,
+    /// A total-spend cap that is negative.
+    InvalidMaxTotal = 22,
 }
