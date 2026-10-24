@@ -1226,3 +1226,100 @@ fn token_plans_pages_are_bounded() {
     );
     assert_eq!(client.token_plans(&token, &u32::MAX, &u32::MAX).len(), 0);
 }
+
+#[test]
+fn set_plan_name_renames_only_the_label() {
+    let (env, client, _) = setup();
+    let merchant = Address::generate(&env);
+    let token = Address::generate(&env);
+    let id = client.create_plan(
+        &merchant,
+        &token,
+        &1_000,
+        &2_592_000,
+        &String::from_str(&env, "Pro Monthly"),
+        &String::from_str(&env, ""),
+        &0,
+    );
+
+    let renamed = String::from_str(&env, "Pro");
+    client.set_plan_name(&merchant, &id, &renamed);
+
+    let plan = client.get_plan(&id);
+    assert_eq!(plan.name, renamed);
+    // Everything a mandate is priced from is frozen.
+    assert_eq!(plan.amount, 1_000);
+    assert_eq!(plan.period, 2_592_000);
+    assert_eq!(plan.token, token);
+    assert!(plan.active);
+}
+
+#[test]
+fn set_plan_name_rejects_another_merchant_and_a_missing_plan() {
+    let (env, client, _) = setup();
+    let merchant = Address::generate(&env);
+    let other = Address::generate(&env);
+    let token = Address::generate(&env);
+    let id = client.create_plan(
+        &merchant,
+        &token,
+        &1_000,
+        &2_592_000,
+        &String::from_str(&env, "Pro Monthly"),
+        &String::from_str(&env, ""),
+        &0,
+    );
+    let name = String::from_str(&env, "Mine now");
+
+    assert_eq!(
+        client.try_set_plan_name(&other, &id, &name),
+        Err(Ok(Error::NotPlanOwner))
+    );
+    assert_eq!(
+        client.try_set_plan_name(&merchant, &(id + 1), &name),
+        Err(Ok(Error::PlanNotFound))
+    );
+}
+
+#[test]
+fn set_plan_name_rejects_a_name_over_the_limit() {
+    let (env, client, _) = setup();
+    let merchant = Address::generate(&env);
+    let token = Address::generate(&env);
+    let id = client.create_plan(
+        &merchant,
+        &token,
+        &1_000,
+        &2_592_000,
+        &String::from_str(&env, "Pro Monthly"),
+        &String::from_str(&env, ""),
+        &0,
+    );
+
+    let long = String::from_str(&env, &"n".repeat(MAX_NAME_LEN as usize + 1));
+    assert_eq!(
+        client.try_set_plan_name(&merchant, &id, &long),
+        Err(Ok(Error::PlanNameTooLong))
+    );
+}
+
+#[test]
+fn set_plan_name_requires_the_merchants_auth() {
+    let (env, client, _) = setup();
+    let merchant = Address::generate(&env);
+    let token = Address::generate(&env);
+    let id = client.create_plan(
+        &merchant,
+        &token,
+        &1_000,
+        &2_592_000,
+        &String::from_str(&env, "Pro Monthly"),
+        &String::from_str(&env, ""),
+        &0,
+    );
+
+    env.set_auths(&[]);
+    assert!(client
+        .try_set_plan_name(&merchant, &id, &String::from_str(&env, "Pro"))
+        .is_err());
+}

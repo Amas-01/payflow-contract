@@ -9,6 +9,12 @@ change the contract interface.
 
 ### Added
 
+- `plan-registry:set_plan_name(merchant, plan_id, name)`: a merchant can rename
+  any of its plans. The name is bounded by `MAX_NAME_LEN` bytes (64); longer
+  names are rejected with `PlanNameTooLong`. Only the plan's merchant may rename
+  it. Emits `PlanRenamed { merchant, plan_id, name }` so indexers and the UI can
+  update immediately.
+
 - `subscription:quote_charge(mandate_id)` returns a read-only
   `ChargeQuote { amount, fee, merchant_amount, due_at, chargeable }`, so clients
   no longer have to reimplement the contract's integer fee split. `charge` and
