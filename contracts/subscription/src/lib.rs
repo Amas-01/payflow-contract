@@ -29,7 +29,7 @@ pub use events::{
     Refunded, SeatsChanged, Subscribed, Upgraded,
 };
 pub use interfaces::{PlanRegistryClient, VaultClient};
-pub use types::{ChargeResult, DataKey, Mandate, MandateStatus, Plan};
+pub use types::{ChargeQuote, ChargeResult, DataKey, Mandate, MandateStatus, Plan};
 
 use payflow_shared::MAX_KEEPER_BPS;
 use soroban_sdk::{contract, contractimpl, token, Address, Env, String, Vec};
@@ -271,23 +271,7 @@ mod contract {
                 return Err(Error::MaxChargesReached);
             }
 
-            // The mandate's own fee and tip, both frozen when the subscriber
-            // opened it. Neither is read from the plan or the config here.
-            let fee = mandate
-                .amount
-                .checked_mul(mandate.fee_bps as i128)
-                .ok_or(Error::AmountOverflow)?
-                / BPS_DENOMINATOR;
-            let merchant_gross = mandate.amount - fee;
-
-            // Tip is a share of the merchant's own money, capped again here so a
-            // mandate can never pay out more than MAX_KEEPER_BPS of that share.
-            let tip_bps = mandate.keeper_bps.min(MAX_KEEPER_BPS);
-            let tip = merchant_gross
-                .checked_mul(tip_bps as i128)
-                .ok_or(Error::AmountOverflow)?
-                / BPS_DENOMINATOR;
-            let merchant_amount = merchant_gross - tip;
+            let (fee, tip, merchant_amount) = Self::fee_split(&mandate)?;
             let charges_made = mandate
                 .charges_made
                 .checked_add(1)
@@ -965,6 +949,36 @@ mod contract {
             Ok(env.ledger().timestamp() >= m.next_charge)
         }
 
+        /// Read-only preview of what `charge` would pay right now.
+        ///
+        /// `amount` is the subscriber's total debit, `fee` the protocol share
+        /// and `merchant_amount` the merchant's net share after both the fee
+        /// and the keeper tip. `due_at` is the mandate's next charge
+        /// timestamp, and `chargeable` mirrors `is_due`: active status, cap
+        /// not reached, and the ledger time has reached `due_at`. Like
+        /// `is_due`, it does not check the vault balance. Quoting reads
+        /// storage but never writes it.
+        ///
+        /// The split comes from the same private helper `charge` uses, so a
+        /// client can display the exact integers settlement will move rather
+        /// than reimplementing the rounding.
+        pub fn quote_charge(env: Env, mandate_id: u64) -> Result<ChargeQuote, Error> {
+            let m = Self::read_mandate(&env, mandate_id)?;
+            let (fee, _tip, merchant_amount) = Self::fee_split(&m)?;
+            let now = env.ledger().timestamp();
+            let chargeable = Self::active_at(&m, now)
+                && (m.max_charges == 0 || m.charges_made < m.max_charges)
+                && now >= m.next_charge;
+
+            Ok(ChargeQuote {
+                amount: m.amount,
+                fee,
+                merchant_amount,
+                due_at: m.next_charge,
+                chargeable,
+            })
+        }
+
         /// Total committed spend of `subscriber` in `token` per `period_secs`,
         /// normalising mandates with different billing periods to the period the
         /// caller asks about. Monthly and weekly mandates therefore add up to one
@@ -1085,6 +1099,28 @@ mod contract {
         /// paused until a date resumes by itself once that date passes; a pause
         /// without a date (`paused_until == 0`) stays in force until `set_paused`
         /// resumes it manually.
+        /// The protocol fee, the keeper tip and the merchant's net share for
+        /// one charge of `m`, all from the rates frozen into the mandate when
+        /// the subscriber opened it. `charge` and `quote_charge` both call
+        /// this, so a quote can never round differently from settlement.
+        fn fee_split(m: &Mandate) -> Result<(i128, i128, i128), Error> {
+            let fee = m
+                .amount
+                .checked_mul(m.fee_bps as i128)
+                .ok_or(Error::AmountOverflow)?
+                / BPS_DENOMINATOR;
+            let merchant_gross = m.amount - fee;
+
+            // Tip is a share of the merchant's own money, capped again here so
+            // a mandate can never pay out more than MAX_KEEPER_BPS of it.
+            let tip_bps = m.keeper_bps.min(MAX_KEEPER_BPS);
+            let tip = merchant_gross
+                .checked_mul(tip_bps as i128)
+                .ok_or(Error::AmountOverflow)?
+                / BPS_DENOMINATOR;
+            Ok((fee, tip, merchant_gross - tip))
+        }
+
         fn active_at(m: &Mandate, now: u64) -> bool {
             match m.status {
                 MandateStatus::Active => true,

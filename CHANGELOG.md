@@ -9,6 +9,27 @@ change the contract interface.
 
 ### Added
 
+- `subscription:quote_charge(mandate_id)` returns a read-only
+  `ChargeQuote { amount, fee, merchant_amount, due_at, chargeable }`, so clients
+  no longer have to reimplement the contract's integer fee split. `charge` and
+  `quote_charge` share one private split helper, so the quote cannot drift from
+  settlement; `chargeable` shares the `is_due` check. Quoting an unknown mandate
+  returns `MandateNotFound`, and quoting never writes storage or emits an
+  event. `merchant_amount` is net of both the protocol fee and the keeper tip,
+  and `chargeable` does not consider the vault balance.
+Interface changes (`quote_charge`/`ChargeQuote`, `set_profile`, `profile`,
+`deactivate_page`, `ProfileUpdated`, `create_plan`'s `keeper_bps`, `charge`'s
+`keeper` argument and the new `tip`/`keeper`/`keeper_bps` event fields) ripple
+into `payflow-backend`, `payflow-frontend` and `payflow-docs`: follow-up issues
+to consume the new fields, call `quote_charge` instead of recomputing the split,
+and pass the keeper argument are tracked in the pull request.
+- **`quote_charge` tests** — the quote matches `charge` for a price that
+  rounds (99 stroops at 100 bps), excludes the keeper tip from
+  `merchant_amount`, returns `MandateNotFound` for an unknown mandate, never
+  changes storage/balances/events, mirrors `is_due` across active, paused,
+  cancelled and completed mandates, needs no authorization, and reports
+  `AmountOverflow` instead of panicking on an extreme price.
+
 ### Security
 
 - **contracts:** add `#![forbid(unsafe_code)]` to every contract crate
