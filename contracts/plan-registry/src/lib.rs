@@ -19,6 +19,8 @@ mod types;
 
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_events;
 
 pub use error::Error;
 pub use events::{PlanCreated, PlanRenamed, PlanStatusChanged, PlanSuccessorSet, ProfileUpdated};
