@@ -2621,3 +2621,23 @@ fn zero_means_no_total_spend_cap_and_a_negative_cap_is_rejected() {
         Err(Ok(Error::InvalidMaxTotal))
     );
 }
+
+#[test]
+fn update_admin_hands_the_role_over() {
+    let w = world();
+    let next = Address::generate(&w.env);
+
+    w.sub.update_admin(&next);
+    assert_eq!(w.sub.admin(), next);
+}
+
+#[test]
+fn update_admin_requires_the_current_admins_auth() {
+    let w = world();
+    let before = w.sub.admin();
+    let next = Address::generate(&w.env);
+
+    w.env.set_auths(&[]);
+    assert!(w.sub.try_update_admin(&next).is_err());
+    assert_eq!(w.sub.admin(), before);
+}

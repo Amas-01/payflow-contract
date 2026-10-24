@@ -1323,3 +1323,23 @@ fn set_plan_name_requires_the_merchants_auth() {
         .try_set_plan_name(&merchant, &id, &String::from_str(&env, "Pro"))
         .is_err());
 }
+
+#[test]
+fn update_admin_hands_the_role_over() {
+    let (env, client, admin) = setup();
+    let next = Address::generate(&env);
+
+    client.update_admin(&next);
+    assert_eq!(client.admin(), next);
+    assert_ne!(client.admin(), admin);
+}
+
+#[test]
+fn update_admin_requires_the_current_admins_auth() {
+    let (env, client, admin) = setup();
+    let next = Address::generate(&env);
+
+    env.set_auths(&[]);
+    assert!(client.try_update_admin(&next).is_err());
+    assert_eq!(client.admin(), admin);
+}

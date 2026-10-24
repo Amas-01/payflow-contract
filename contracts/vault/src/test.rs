@@ -839,3 +839,23 @@ fn debits_stop_after_subscription_contract_is_replaced() {
     assert_eq!(h.vault.balance(&user, &h.token), 3_000);
     assert_eq!(h.token_client.balance(&merchant), 2_000);
 }
+
+#[test]
+fn update_admin_hands_the_role_over() {
+    let h = setup();
+    let next = Address::generate(&h.env);
+
+    h.vault.update_admin(&next);
+    assert_eq!(h.vault.admin(), next);
+}
+
+#[test]
+fn update_admin_requires_the_current_admins_auth() {
+    let h = setup();
+    let before = h.vault.admin();
+    let next = Address::generate(&h.env);
+
+    h.env.set_auths(&[]);
+    assert!(h.vault.try_update_admin(&next).is_err());
+    assert_eq!(h.vault.admin(), before);
+}

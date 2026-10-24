@@ -1102,6 +1102,25 @@ mod contract {
                 .ok_or(Error::NotInitialized)
         }
 
+        /// Hand the admin role to another address. Only the current admin may
+        /// call this, and the new admin takes effect immediately: the old one
+        /// keeps no authority. A deployment whose admin key is lost or
+        /// rotated is otherwise stuck with it for the life of the contract.
+        ///
+        /// # Auth
+        /// Requires authorization from the current admin.
+        pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+            let current: Address = Self::admin(env.clone())?;
+            current.require_auth();
+
+            env.storage().instance().set(&DataKey::Admin, &new_admin);
+            env.storage()
+                .instance()
+                .extend_ttl(INSTANCE_THRESHOLD, INSTANCE_BUMP);
+
+            Ok(())
+        }
+
         /// Address of the contract administrator.
         pub fn admin(env: Env) -> Result<Address, Error> {
             Self::cfg_address(&env, DataKey::Admin)
